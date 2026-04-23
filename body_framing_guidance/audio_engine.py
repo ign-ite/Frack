@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from config import (
+    AUDIO_CACHE_FOLDER,
     AUDIO_CLIPS_FOLDER,
     AUDIO_TTS_RATE,
     INSTRUCTION_PHRASES,
@@ -35,7 +36,9 @@ class AudioEngine:
         self._tts_engine = None
         self._audio_files: Dict[str, Path] = {}
         self._temp_audio_dir: Optional[Path] = None
+        self._audio_cache_dir = self._project_root / AUDIO_CACHE_FOLDER
 
+        self._ensure_audio_cache_dir()
         self._initialize_layers()
 
     @property
@@ -174,26 +177,47 @@ class AudioEngine:
             return str(exc)
 
     def _try_initialize_layer2(self) -> Optional[str]:
-        """Initialize Layer 2 from local pre-recorded clips.
-
-        Returns:
-            None on success, otherwise an error string describing the failure.
-        """
-        if not self._pygame_ready:
-            return "pygame is not ready"
-
-        clips_dir = self._project_root / AUDIO_CLIPS_FOLDER
-        if not clips_dir.exists():
-            return f"missing folder: {clips_dir}"
-
-        missing_files = [
-            file_name
-            for file_name in LAYER2_REQUIRED_FILES
-            if not (clips_dir / file_name).exists()
-        ]
-        if missing_files:
-            return f"missing required clip files: {', '.join(missing_files)}"
-
+         """Initialize Layer 2 from local cached or pre-recorded clips.
+ 
+         Returns:
+             None on success, otherwise an error string describing the failure.
+         """
+         if not self._pygame_ready:
+             return "pygame is not ready"
+ 
++        cache_dir = self._audio_cache_dir
++        clip_dir = self._project_root / AUDIO_CLIPS_FOLDER
++
++        source_dir = None
++        for candidate_dir in (cache_dir, clip_dir):
++            missing_files = [
++                file_name
++                for file_name in LAYER2_REQUIRED_FILES
++                if not (candidate_dir / file_name).exists()
++            ]
++            if not missing_files:
++                source_dir = candidate_dir
++                break
++
++        if source_dir is None:
++            return (
++                f"missing required clip files in either {cache_dir} or {clip_dir}. "
++                "Add manual clips or run with internet to generate cached audio."
++            )
++
++        self._audio_files.clear()
++        for instruction_key in INSTRUCTION_PHRASES:
++            clip_path = source_dir / f"{instruction_key}.mp3"
++            self._audio_files[instruction_key] = clip_path
++
++        label = "audio cache" if source_dir == cache_dir else "pre-recorded clips"
++        self._active_layer = "layer2"
++        self._active_layer_label = f"Layer 2 ({label}+pygame)"
++        print(
++            "[AudioEngine] "
++            f"Audio Layer 2 ({label} + pygame) initialized successfully"
++        )
++        return None
         self._audio_files.clear()
         for instruction_key in INSTRUCTION_PHRASES:
             clip_path = clips_dir / f"{instruction_key}.mp3"

@@ -102,6 +102,7 @@ NO_CAMERA_TEXT_START_Y = 120
 NO_CAMERA_TEXT_LINE_SPACING = 34
 
 # Audio phrases and files
+AUDIO_CACHE_FOLDER = "audio_cache"
 AUDIO_CLIPS_FOLDER = "audio_clips"
 TEMP_AUDIO_PREFIX = "body_framing_guidance_audio_"
 AUDIO_TTS_RATE = 180

@@ -1,8 +1,14 @@
-.venv
 .venv/
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-audio_clips/
-*.mp3
+.DS_Store
+Thumbs.db
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.log
+*.tmp
+*.cache
