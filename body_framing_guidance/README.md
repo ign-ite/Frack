@@ -24,10 +24,17 @@ From the project root:
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-Set up and run in one command:
+What this script now does automatically:
+- Detects Python 3.12.
+- If missing, installs Python 3.12 (tries `winget`, then python.org installer fallback).
+- Creates/repairs `.venv` with Python 3.12.
+- Installs dependencies from `requirements.txt`.
+- Launches the app.
+
+Setup only (do not launch app):
 
 ```bash
-powershell -ExecutionPolicy Bypass -File .\setup.ps1 -RunApp
+powershell -ExecutionPolicy Bypass -File .\setup.ps1 -SetupOnly
 ```
 
 Run app with a specific camera index:
