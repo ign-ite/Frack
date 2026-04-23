@@ -1,19 +1,75 @@
-# Tradeoff Analysis
+# Runtime Tradeoffs (Current)
 
-## Vision Model Comparison
-| Option | Speed on CPU | Keypoints | Ease of Setup | Accuracy | Fitness App Suitability | Our Choice |
-|---|---|---:|---|---|---|---|
-| MediaPipe Pose (BlazePose) | High (real-time on typical laptop CPU) | 33 | Very easy (`pip install mediapipe`) | Good for real-time pose and body coverage heuristics | High (includes ankles/feet and fitness-oriented examples) | Yes |
-| MoveNet | High | 17 | Easy to moderate (depends on runtime wrapper) | Good for coarse pose | Medium (fewer landmarks, less lower-body detail) | No |
-| YOLOv8-Pose | Medium to low on CPU for real-time target | Typically 17 (variant-dependent) | Moderate to heavy | High potential, especially with GPU | Medium to high, but heavy for assignment scope | No |
-| OpenPose | Low on CPU (better with GPU) | Rich skeleton outputs | Hard (complex dependencies/build) | Historically strong | Medium (engineering overhead too high for quick prototype) | No |
+## Product Direction
+This pass intentionally prioritized features that reduce setup friction and improve autonomous operation:
+- hands-free control
+- orientation-robust guidance
+- automation and logging
 
-## Audio Option Comparison
-| Option | Quality | Offline? | Latency | Setup Complexity | Our Choice |
-|---|---|---|---|---|---|
-| gTTS + pygame | High (natural voice) | No (internet required for synthesis) | Low at runtime after startup generation | Moderate | Primary (Layer 1) |
-| Pre-recorded clips + pygame | Variable (depends on recordings) | Yes | Very low | Moderate (manual recording + file management) | Fallback (Layer 2) |
-| pyttsx3 | Medium to low (robotic but understandable) | Yes | Low to moderate | Easy | Final fallback (Layer 3) |
+## Tradeoff Summary
 
-## Debounce Design Decision
-A single debounce mechanism is not enough for noisy real-time pose streams. If only cooldown is used, the system can still chatter whenever state alternation aligns with timer expiry. If only state-change gating is used, rapid threshold oscillation still produces repeated alternations (`TOO_FAR -> GOOD -> TOO_FAR`) and frequent prompts. The chosen hybrid design applies three layers: (1) an 8-frame stability buffer to suppress transient jitter, (2) a state-change gate so unchanged states are not re-spoken, and (3) a 2.5-second minimum cooldown to cap prompt frequency even under sustained boundary oscillation. This combination gave the best balance between responsiveness and user-comfortable audio behavior.
+## 1) Gesture + Web Controls vs Voice Commands
+Decision:
+- Implemented gesture and remote web controls first.
+
+Why:
+- They are more deterministic in noisy home/gym environments than speech recognition.
+- They align better with demo reliability and practical control from a phone.
+
+Cost:
+- Voice command convenience is deferred to a later iteration.
+
+## 2) Orientation Heuristics vs Full 3D Orientation Estimation
+Decision:
+- Implemented torso geometry heuristics to classify `FRONT` vs `SIDE`.
+
+Why:
+- Keeps runtime fast and interpretable on CPU.
+- Improves resilience for side-facing users without model complexity.
+
+Cost:
+- Extreme oblique angles can still be ambiguous.
+
+## 3) Deterministic Framing Rules vs Learned Quality Model
+Decision:
+- Retained deterministic keypoint rules with calibration.
+
+Why:
+- Fast, debuggable behavior and low engineering overhead.
+- Calibration personalizes thresholds without requiring training data.
+
+Cost:
+- Rules are less adaptive than a trained model for unusual body/camera setups.
+
+## 4) Local Flask Control Panel vs Native UI App
+Decision:
+- Added lightweight Flask panel.
+
+Why:
+- Works instantly from a phone browser on local network.
+- Minimal implementation complexity and no packaging burden.
+
+Cost:
+- No native mobile app affordances.
+
+## 5) CSV Logging vs Full Telemetry Pipeline
+Decision:
+- Added local CSV session logs.
+
+Why:
+- Immediate observability and reproducibility for QA/interviews.
+- Zero infrastructure requirements.
+
+Cost:
+- No centralized analytics or dashboards.
+
+## 6) Startup Countdown vs Immediate Analysis
+Decision:
+- Added strict startup countdown before analysis begins.
+
+Why:
+- Better user experience for one-person setup.
+- Reduces unstable early-frame noise while user is moving into position.
+
+Cost:
+- Adds fixed startup latency.

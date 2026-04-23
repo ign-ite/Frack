@@ -1,0 +1,2 @@
+timestamp,event_type,state,orientation,body_span_ratio,mid_hip_x,lean_angle_deg,assessment_mode,source,details
+2026-04-23 17:18:40,state_change,NO_PERSON,UNKNOWN,,,,False,system,

@@ -6,3 +6,5 @@ mediapipe==0.10.14
 gTTS>=2.5.1
 pygame>=2.5.2
 pyttsx3>=2.90
+Flask>=3.0.0
+cv2-enumerate-cameras>=1.1.17

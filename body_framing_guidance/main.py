@@ -1,23 +1,35 @@
 """Entry point for real-time body framing guidance."""
 
 import argparse
+import platform
+import queue
 import time
-from typing import List, Optional, Tuple
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import cv2
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
+
 import numpy as np
 
 from audio_engine import AudioEngine
 from config import (
+    AUTO_ASSESS_BAD_HOLD_SECONDS,
+    AUTO_ASSESS_GOOD_HOLD_SECONDS,
+    CALIBRATE_KEY,
     CAMERA_RECONNECT_ATTEMPTS,
     CAMERA_RECONNECT_WAIT_SECONDS,
     CAMERA_SCAN_MAX_INDEX,
     CAMERA_WARMUP_FRAMES,
+    DEBUG_TOGGLE_KEY,
     EXIT_KEY,
     FPS_LOG_INTERVAL,
     FRAME_HEIGHT,
     FRAME_WIDTH,
+    LEAN_ANGLE_WARNING_DEGREES,
     MAX_CONSECUTIVE_READ_FAILURES,
+    MUTE_KEY,
     NO_CAMERA_AUDIO_INTERVAL_SECONDS,
     NO_CAMERA_CHOOSE_KEY,
     NO_CAMERA_ERROR_COLOR,
@@ -29,14 +41,26 @@ from config import (
     NO_CAMERA_TEXT_LINE_SPACING,
     NO_CAMERA_TEXT_START_Y,
     NO_CAMERA_TITLE_TEXT,
+    POSTURE_WARNING_COOLDOWN_SECONDS,
+    SCREENSHOT_FOLDER,
+    SCREENSHOT_KEY,
     SMALL_FONT_SCALE,
+    START_ASSESS_KEY,
+    STARTUP_COUNTDOWN_SECONDS,
+    STOP_ASSESS_KEY,
     WAIT_KEY_DELAY_MS,
+    WEB_PANEL_ENABLED_DEFAULT,
+    WEB_PANEL_HOST,
+    WEB_PANEL_PORT,
     WEBCAM_INDEX,
     WINDOW_TITLE,
 )
 from debounce_controller import DebounceController
-from framing_logic import FramingLogic, state_to_instruction_key
+from framing_logic import FramingLogic, FramingState, state_to_instruction_key
+from gesture_controller import GestureController
 from pose_detector import PoseDetector
+from remote_control import RemoteControlServer
+from session_logger import SessionLogger
 from utils import draw_guidance_overlay, draw_pose_skeleton
 
 
@@ -81,6 +105,23 @@ def parse_arguments() -> argparse.Namespace:
         default=FRAME_HEIGHT,
         help="Requested capture height in pixels",
     )
+    parser.add_argument(
+        "--no-web-panel",
+        action="store_true",
+        help="Disable the local web control panel.",
+    )
+    parser.add_argument(
+        "--web-panel-host",
+        type=str,
+        default=WEB_PANEL_HOST,
+        help="Host for web control panel.",
+    )
+    parser.add_argument(
+        "--web-panel-port",
+        type=int,
+        default=WEB_PANEL_PORT,
+        help="Port for web control panel.",
+    )
     return parser.parse_args()
 
 
@@ -99,7 +140,7 @@ def initialize_camera(
     Returns:
         Initialized cv2.VideoCapture object or None if the camera fails to open.
     """
-    camera = cv2.VideoCapture(index)
+    camera = _create_video_capture(index)
     camera.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
     camera.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
 
@@ -129,20 +170,30 @@ def discover_available_cameras(
     """
     available_indices: List[int] = []
     for index in range(0, max_camera_index + 1):
-        probe = cv2.VideoCapture(index)
+        probe = _create_video_capture(index)
         if not probe.isOpened():
             probe.release()
             continue
 
-        probe.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
-        probe.set(cv2.CAP_PROP_FRAME_HEIGHT, frame_height)
-        success, frame = probe.read()
-        if success and frame is not None:
-            available_indices.append(index)
+        for _ in range(3):
+            success, frame = probe.read()
+            if success and frame is not None:
+                available_indices.append(index)
+                break
 
         probe.release()
 
     return available_indices
+
+
+def _create_video_capture(index: int) -> cv2.VideoCapture:
+    """Create cross-platform camera capture with backend preferences."""
+    system_name = platform.system().lower()
+    if "windows" in system_name:
+        return cv2.VideoCapture(index, cv2.CAP_DSHOW)
+    if "darwin" in system_name:
+        return cv2.VideoCapture(index, cv2.CAP_AVFOUNDATION)
+    return cv2.VideoCapture(index)
 
 
 def print_available_cameras(available_indices: List[int]) -> None:
@@ -158,9 +209,80 @@ def print_available_cameras(available_indices: List[int]) -> None:
         print("[Main] No cameras detected.")
         return
 
-    print("[Main] Detected camera indices:")
+    camera_names = discover_camera_names(max(available_indices))
+    print("[Main] Detected camera devices:")
     for index in available_indices:
-        print(f"  - {index}")
+        device_name = camera_names.get(index, "Unknown device")
+        print(f"  - {index}: {device_name}")
+
+
+def discover_camera_names(max_camera_index: int) -> Dict[int, str]:
+    """Best-effort camera name discovery keyed by OpenCV index.
+
+    This is intentionally fail-soft: if backend APIs are unavailable, callers
+    still receive stable index-based behavior.
+    """
+    names: Dict[int, str] = {}
+
+    try:
+        from cv2_enumerate_cameras import enumerate_cameras  # type: ignore
+
+        for camera_info in enumerate_cameras():
+            raw_index = getattr(camera_info, "index", None)
+            if not isinstance(raw_index, int) or raw_index < 0:
+                continue
+
+            device_name = str(getattr(camera_info, "name", "")).strip()
+            if not device_name:
+                device_name = str(getattr(camera_info, "path", "")).strip()
+
+            if not device_name:
+                continue
+
+            for candidate_index in _candidate_base_indices(raw_index):
+                if 0 <= candidate_index <= max_camera_index and candidate_index not in names:
+                    names[candidate_index] = device_name
+    except Exception:
+        # Optional dependency: ignore and try platform-specific fallback below.
+        pass
+
+    if names:
+        return names
+
+    if platform.system().lower().startswith("windows"):
+        try:
+            from pygrabber.dshow_graph import FilterGraph  # type: ignore
+
+            graph = FilterGraph()
+            for index, device_name in enumerate(graph.get_input_devices()):
+                if index > max_camera_index:
+                    break
+                cleaned_name = str(device_name).strip()
+                if cleaned_name:
+                    names[index] = cleaned_name
+        except Exception:
+            pass
+
+    return names
+
+
+def _candidate_base_indices(raw_index: int) -> List[int]:
+    """Return likely OpenCV base indices for backend-offset camera indices."""
+    candidates = [raw_index]
+
+    # Common backend offsets for OpenCV camera APIs.
+    for offset in (cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_V4L2, cv2.CAP_AVFOUNDATION):
+        if raw_index >= int(offset):
+            candidates.append(raw_index - int(offset))
+
+    # Legacy compact normalization fallback.
+    candidates.append(raw_index % 100)
+
+    unique_candidates: List[int] = []
+    for index in candidates:
+        if index not in unique_candidates:
+            unique_candidates.append(index)
+    return unique_candidates
 
 
 def prompt_for_camera_choice(available_indices: List[int]) -> Optional[int]:
@@ -177,10 +299,9 @@ def prompt_for_camera_choice(available_indices: List[int]) -> Optional[int]:
         return None
 
     print_available_cameras(available_indices)
-    default_index = available_indices[0]
-    prompt = (
-        f"Select camera index (Enter for {default_index}, 'q' to cancel): "
-    )
+    # No default; require user to type a numeric index or quit.
+    prompt = "Select camera index (enter number, or 'q' to cancel): "
+
 
     while True:
         try:
@@ -190,7 +311,8 @@ def prompt_for_camera_choice(available_indices: List[int]) -> Optional[int]:
             return None
 
         if raw_value == "":
-            return default_index
+            print("[Main] You must enter a valid camera index, or 'q' to quit.")
+            continue
 
         lowered = raw_value.lower()
         if lowered in {"q", "quit", "exit"}:
@@ -267,9 +389,7 @@ def warmup_camera(camera: cv2.VideoCapture, warmup_frames: int) -> None:
         None.
     """
     for _ in range(warmup_frames):
-        success, _ = camera.read()
-        if not success:
-            break
+        camera.read()
 
 
 def build_no_camera_frame(
@@ -277,6 +397,7 @@ def build_no_camera_frame(
     frame_height: int,
     preferred_camera_index: Optional[int],
     available_indices: List[int],
+    camera_names: Optional[Dict[int, str]] = None,
 ) -> np.ndarray:
     """Create a static black frame with missing-camera status instructions.
 
@@ -296,7 +417,14 @@ def build_no_camera_frame(
         if preferred_camera_index is not None
         else f"auto ({WEBCAM_INDEX} fallback)"
     )
-    detected_text = ", ".join(str(index) for index in available_indices) or "none"
+    if camera_names is None:
+        camera_names = discover_camera_names(max(available_indices) if available_indices else 0)
+
+    detected_parts: List[str] = []
+    for index in available_indices:
+        device_name = camera_names.get(index, "Unknown")
+        detected_parts.append(f"{index}:{device_name}")
+    detected_text = ", ".join(detected_parts) if detected_parts else "none"
 
     lines = [
         (NO_CAMERA_TITLE_TEXT, NO_CAMERA_ERROR_COLOR),
@@ -361,6 +489,7 @@ def run_no_camera_mode(
         frame_width=frame_width,
         frame_height=frame_height,
     )
+    camera_names = discover_camera_names(max_camera_index)
     last_scan_time = 0.0
     last_audio_time = 0.0
 
@@ -379,6 +508,7 @@ def run_no_camera_mode(
                 frame_width=frame_width,
                 frame_height=frame_height,
             )
+            camera_names = discover_camera_names(max_camera_index)
             last_scan_time = now
 
             if (
@@ -413,6 +543,7 @@ def run_no_camera_mode(
             frame_height=frame_height,
             preferred_camera_index=preferred_camera_index,
             available_indices=available_indices,
+            camera_names=camera_names,
         )
         cv2.imshow(WINDOW_TITLE, frame)
 
@@ -432,6 +563,7 @@ def run_no_camera_mode(
                 frame_width=frame_width,
                 frame_height=frame_height,
             )
+            camera_names = discover_camera_names(max_camera_index)
             target_index = resolve_camera_index(
                 requested_index=preferred_camera_index,
                 available_indices=available_indices,
@@ -455,6 +587,7 @@ def run_no_camera_mode(
                 frame_width=frame_width,
                 frame_height=frame_height,
             )
+            camera_names = discover_camera_names(max_camera_index)
             selected_index = prompt_for_camera_choice(available_indices)
             if selected_index is None:
                 continue
@@ -574,10 +707,38 @@ def main() -> None:
     pose_detector = PoseDetector()
     framing_logic = FramingLogic()
     debounce_controller = DebounceController()
+    gesture_controller = GestureController()
+    session_logger = SessionLogger()
+
+    command_queue: "queue.Queue[Tuple[str, str]]" = queue.Queue()
+    remote_server = None
+    if WEB_PANEL_ENABLED_DEFAULT and not args.no_web_panel:
+        remote_server = RemoteControlServer(
+            command_queue=command_queue,
+            host=args.web_panel_host,
+            port=args.web_panel_port,
+        )
+        if remote_server.start():
+            print(f"[Main] Web control panel active at {remote_server.url}")
+        else:
+            print(f"[Main] Web panel disabled: {remote_server.startup_error}")
+            remote_server = None
 
     frame_count = 0
     fps_tick = time.time()
+    fps_value: Optional[float] = None
     consecutive_read_failures = 0
+    is_muted = False
+    debug_enabled = True
+    assessment_mode = False
+    startup_time = time.time()
+    screenshot_dir = Path(__file__).resolve().parent / SCREENSHOT_FOLDER
+    screenshot_dir.mkdir(parents=True, exist_ok=True)
+
+    last_stable_state = None
+    good_hold_started_at: Optional[float] = None
+    bad_hold_started_at: Optional[float] = None
+    last_posture_warning_at = 0.0
 
     print("[Main] Starting real-time framing guidance. Press 'q' to exit.")
 
@@ -635,6 +796,54 @@ def main() -> None:
 
             consecutive_read_failures = 0
 
+            now = time.time()
+            countdown_remaining = max(0.0, STARTUP_COUNTDOWN_SECONDS - (now - startup_time))
+            if countdown_remaining > 0:
+                draw_guidance_overlay(
+                    frame_bgr=frame,
+                    state_label="WARMUP",
+                    body_span_ratio=None,
+                    mid_hip_x=None,
+                    audio_layer_label=audio_engine.active_layer_label,
+                    orientation_label="UNKNOWN",
+                    shoulder_confidence=None,
+                    ankle_confidence=None,
+                    lean_angle_deg=None,
+                    fps_value=fps_value,
+                    is_muted=is_muted,
+                    assessment_mode=False,
+                    debug_enabled=debug_enabled,
+                    hip_left_threshold=framing_logic.hip_thresholds[0],
+                    hip_right_threshold=framing_logic.hip_thresholds[1],
+                    countdown_remaining=countdown_remaining,
+                    good_hold_remaining=None,
+                    posture_warning=False,
+                )
+                cv2.imshow(WINDOW_TITLE, frame)
+
+                frame_count += 1
+                if frame_count % FPS_LOG_INTERVAL == 0:
+                    now_fps = time.time()
+                    elapsed = max(1e-6, now_fps - fps_tick)
+                    fps_value = FPS_LOG_INTERVAL / elapsed
+                    print(f"[Main] FPS: {fps_value:.2f}")
+                    fps_tick = now_fps
+
+                key = cv2.waitKey(WAIT_KEY_DELAY_MS) & 0xFF
+                if key == ord(EXIT_KEY):
+                    print("[Main] Exit key detected. Shutting down.")
+                    break
+                if key == ord(SCREENSHOT_KEY):
+                    screenshot_path = _save_screenshot(frame, screenshot_dir, source="keyboard")
+                    session_logger.log_action("screenshot", source="keyboard", details=screenshot_path)
+                if key == ord(MUTE_KEY):
+                    is_muted = not is_muted
+                    session_logger.log_action("toggle_mute", source="keyboard", details=str(is_muted))
+                if key == ord(DEBUG_TOGGLE_KEY):
+                    debug_enabled = not debug_enabled
+                    session_logger.log_action("toggle_debug", source="keyboard", details=str(debug_enabled))
+                continue
+
             detection = pose_detector.detect(frame)
             analysis = framing_logic.classify(
                 landmarks=detection.landmarks,
@@ -642,44 +851,176 @@ def main() -> None:
                 critical_joints_confident=detection.critical_joints_confident,
             )
 
+            if last_stable_state != analysis.state:
+                session_logger.log_state_change(
+                    state=analysis.state.value,
+                    orientation=analysis.orientation_label,
+                    body_span_ratio=analysis.body_span_ratio,
+                    mid_hip_x=analysis.mid_hip_x,
+                    lean_angle_deg=analysis.lean_angle_deg,
+                    assessment_mode=assessment_mode,
+                )
+                last_stable_state = analysis.state
+
+            if detection.landmarks is not None:
+                gesture_actions = gesture_controller.update(detection.landmarks, now=now)
+                for action in gesture_actions:
+                    command_queue.put(("gesture", action))
+            else:
+                gesture_controller.update(None, now=now)
+
             decision = debounce_controller.update(analysis.state)
             stable_state = (
                 decision.stable_state if decision.stable_state is not None else analysis.state
             )
 
-            if decision.should_speak and decision.state_to_speak is not None:
+            if stable_state == analysis.state == FramingState.GOOD:
+                if good_hold_started_at is None:
+                    good_hold_started_at = now
+                if not assessment_mode and (now - good_hold_started_at) >= AUTO_ASSESS_GOOD_HOLD_SECONDS:
+                    assessment_mode = True
+                    session_logger.log_action("assessment_start", source="auto")
+                    _save_screenshot(frame, screenshot_dir, source="auto_start")
+                    if not is_muted:
+                        audio_engine.speak("good")
+            else:
+                good_hold_started_at = None
+
+            if assessment_mode and stable_state != FramingState.GOOD:
+                if bad_hold_started_at is None:
+                    bad_hold_started_at = now
+                if (now - bad_hold_started_at) >= AUTO_ASSESS_BAD_HOLD_SECONDS:
+                    assessment_mode = False
+                    session_logger.log_action("assessment_stop", source="auto")
+            else:
+                bad_hold_started_at = None
+
+            posture_warning = (
+                analysis.lean_angle_deg is not None
+                and analysis.lean_angle_deg >= LEAN_ANGLE_WARNING_DEGREES
+            )
+            if (
+                posture_warning
+                and not is_muted
+                and now - last_posture_warning_at >= POSTURE_WARNING_COOLDOWN_SECONDS
+            ):
+                audio_engine.speak("hold")
+                last_posture_warning_at = now
+
+            if decision.should_speak and decision.state_to_speak is not None and not is_muted:
                 instruction_key = state_to_instruction_key(decision.state_to_speak)
                 audio_engine.speak(instruction_key)
 
+            while True:
+                try:
+                    source, action = command_queue.get_nowait()
+                except queue.Empty:
+                    break
+
+                if action in {"toggle_mute", "mute"}:
+                    is_muted = not is_muted
+                    session_logger.log_action("toggle_mute", source=source, details=str(is_muted))
+                elif action == "screenshot":
+                    screenshot_path = _save_screenshot(frame, screenshot_dir, source=source)
+                    session_logger.log_action("screenshot", source=source, details=screenshot_path)
+                elif action == "calibrate":
+                    if framing_logic.calibrate(detection.landmarks, frame.shape[0]):
+                        session_logger.log_action("calibrate", source=source, details="ok")
+                    else:
+                        session_logger.log_action("calibrate", source=source, details="failed")
+                elif action == "start":
+                    assessment_mode = True
+                    session_logger.log_action("assessment_start", source=source)
+                elif action == "stop":
+                    assessment_mode = False
+                    session_logger.log_action("assessment_stop", source=source)
+
             draw_pose_skeleton(frame, detection.pose_landmarks_proto)
+
+            good_hold_remaining = None
+            if not assessment_mode:
+                if good_hold_started_at is None:
+                    good_hold_remaining = AUTO_ASSESS_GOOD_HOLD_SECONDS
+                else:
+                    elapsed_good_hold = now - good_hold_started_at
+                    good_hold_remaining = max(0.0, AUTO_ASSESS_GOOD_HOLD_SECONDS - elapsed_good_hold)
+
             draw_guidance_overlay(
                 frame_bgr=frame,
                 state_label=stable_state.value,
                 body_span_ratio=analysis.body_span_ratio,
                 mid_hip_x=analysis.mid_hip_x,
                 audio_layer_label=audio_engine.active_layer_label,
+                orientation_label=analysis.orientation_label,
+                shoulder_confidence=analysis.shoulder_confidence,
+                ankle_confidence=analysis.ankle_confidence,
+                lean_angle_deg=analysis.lean_angle_deg,
+                fps_value=fps_value,
+                is_muted=is_muted,
+                assessment_mode=assessment_mode,
+                debug_enabled=debug_enabled,
+                hip_left_threshold=framing_logic.hip_thresholds[0],
+                hip_right_threshold=framing_logic.hip_thresholds[1],
+                countdown_remaining=countdown_remaining if countdown_remaining > 0 else None,
+                good_hold_remaining=good_hold_remaining,
+                posture_warning=posture_warning,
             )
 
             cv2.imshow(WINDOW_TITLE, frame)
 
             frame_count += 1
-            fps_tick = log_fps(frame_count, fps_tick)
+            if frame_count % FPS_LOG_INTERVAL == 0:
+                now_fps = time.time()
+                elapsed = max(1e-6, now_fps - fps_tick)
+                fps_value = FPS_LOG_INTERVAL / elapsed
+                print(f"[Main] FPS: {fps_value:.2f}")
+                fps_tick = now_fps
 
             key = cv2.waitKey(WAIT_KEY_DELAY_MS) & 0xFF
             if key == ord(EXIT_KEY):
                 print("[Main] Exit key detected. Shutting down.")
                 break
+            if key == ord(SCREENSHOT_KEY):
+                screenshot_path = _save_screenshot(frame, screenshot_dir, source="keyboard")
+                session_logger.log_action("screenshot", source="keyboard", details=screenshot_path)
+            if key == ord(MUTE_KEY):
+                is_muted = not is_muted
+                session_logger.log_action("toggle_mute", source="keyboard", details=str(is_muted))
+            if key == ord(DEBUG_TOGGLE_KEY):
+                debug_enabled = not debug_enabled
+                session_logger.log_action("toggle_debug", source="keyboard", details=str(debug_enabled))
+            if key == ord(CALIBRATE_KEY):
+                if framing_logic.calibrate(detection.landmarks, frame.shape[0]):
+                    session_logger.log_action("calibrate", source="keyboard", details="ok")
+                else:
+                    session_logger.log_action("calibrate", source="keyboard", details="failed")
+            if key == ord(START_ASSESS_KEY):
+                assessment_mode = True
+                session_logger.log_action("assessment_start", source="keyboard")
+            if key == ord(STOP_ASSESS_KEY):
+                assessment_mode = False
+                session_logger.log_action("assessment_stop", source="keyboard")
 
     except KeyboardInterrupt:
         # Ctrl+C should always trigger a clean shutdown path.
         print("\n[Main] Keyboard interrupt received. Shutting down.")
     finally:
+        if remote_server is not None:
+            remote_server.stop()
         audio_engine.shutdown()
         pose_detector.close()
+        session_logger.close()
         if camera is not None:
             camera.release()
         cv2.destroyAllWindows()
         print("[Main] Cleanup complete.")
+
+
+def _save_screenshot(frame, screenshot_dir: Path, source: str) -> str:
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    path = screenshot_dir / f"capture_{source}_{timestamp}.jpg"
+    cv2.imwrite(str(path), frame)
+    return str(path)
 
 
 if __name__ == "__main__":

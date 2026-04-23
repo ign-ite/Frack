@@ -1,7 +1,7 @@
 """MediaPipe Pose wrapper for real-time landmark extraction.
 
-This module intentionally assumes a single front-facing person in frame, matching
-this prototype's assignment constraints.
+This module assumes a single person in frame and supports both front-facing
+and side-facing orientations for downstream framing logic.
 """
 
 from dataclasses import dataclass

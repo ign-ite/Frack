@@ -1,163 +1,136 @@
-# Frack
+# Frack: Real-Time Body Framing Guidance
 
-## Project summary
-This repository contains a real-time body framing guidance prototype built in Python. The codebase uses a live webcam feed, MediaPipe Pose for full-body keypoint estimation, deterministic framing heuristics, and audio prompts to help a user position their body correctly in frame.
+A webcam-based Python application that guides a user into a camera-ready full-body position for assessment workflows.
 
-All source code is contained in the `body_framing_guidance/` folder. This README is the entry point for GitHub and is intentionally placed at the repository root so the project can be uploaded and shared easily.
+This version prioritizes high-value product features over cosmetic add-ons:
+- Robust framing analysis for both front-facing and side-facing body orientations
+- Hands-free controls with gestures
+- Auto-start and auto-stop assessment mode
+- Remote control panel from a phone browser
+- Runtime calibration and session logging
+- Cleaner on-screen guidance with directional arrows and confidence telemetry
 
-## What this app does
-- Captures a live webcam feed
-- Detects a person using MediaPipe Pose with 33 landmarks
-- Computes framing quality based on body span and hip centering
-- Provides real-time spoken guidance such as:
-  - "Please step into frame"
-  - "Please move back"
-  - "Please come closer"
-  - "Move to your left"
-  - "Move to your right"
-  - "You're in frame. Hold this position."
-- Uses a layered audio fallback chain for reliability
-- Implements stability buffering and cooldowns to avoid noisy repeated prompts
-- Recovers gracefully when the camera is unavailable
+## High-Value Features Implemented
 
-## Repository structure
+### 1) Orientation-Robust Framing (Front + Side)
+The classifier now estimates orientation (`FRONT` vs `SIDE`) using torso width/height geometry and keeps framing guidance stable for either pose orientation.
+
+### 2) Gesture Controls
+No extra libraries required; uses existing pose keypoints:
+- Left-hand wave (while raised): mute/unmute
+- Both hands above head (hold): save screenshot
+- T-pose (hold ~2s): run calibration
+
+### 3) Auto Assessment Flow
+- When user holds `GOOD` for 3 consecutive seconds, assessment mode starts automatically
+- A screenshot is auto-saved at assessment start
+- If user drifts out of `GOOD` for 2 seconds, assessment mode auto-stops
+
+### 4) Phone Web Control Panel
+Optional local Flask server provides controls at `http://<host>:5000`:
+- Start assessment
+- Stop assessment
+- Mute/unmute
+- Screenshot
+- Calibrate baseline
+
+### 5) Timed Launch
+A startup countdown is rendered for 10 seconds. Pose analysis begins after countdown completes.
+
+### 6) Calibration Mode
+Calibration captures the user’s current “good” pose baseline and stores dynamic thresholds in:
+- `body_framing_guidance/calibration_profile.json`
+
+### 7) Product Telemetry / Observability
+Session events are written to CSV:
+- Folder: `body_framing_guidance/session_logs/`
+- Includes state changes, orientation, key metrics, and action sources (keyboard, gesture, remote, auto)
+
+### 8) Cleaner UI Overlay
+Overlay now includes:
+- State, orientation, assessment status
+- Directional arrows for left/right correction
+- FPS, audio status, confidence metrics
+- Lean-angle warning for posture stability
+- Countdown and hold timers
+
+## Keyboard Controls
+- `q` quit
+- `s` screenshot
+- `m` mute/unmute
+- `d` toggle debug telemetry overlay
+- `c` calibration
+- `a` start assessment
+- `x` stop assessment
+
+## Requirements
+- Python 3.10-3.12 (recommended: 3.12)
+- Webcam
+
+Install dependencies:
+
+```bash
+python -m pip install -r requirements.txt
 ```
-/eidovis
-  |-- .gitignore
-  |-- README.md
-  |-- TRADEOFFS.md
-  |-- requirements.txt
-  |-- setup.ps1
-  |-- body_framing_guidance/
-       |-- main.py
-       |-- config.py
-       |-- pose_detector.py
-       |-- framing_logic.py
-       |-- debounce_controller.py
-       |-- audio_engine.py
-       |-- utils.py
-       |-- audio_clips/
-            |-- README.txt
-```
 
-## Getting started
-### Recommended installation
-From the repository root, run:
+### Windows (automated)
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\setup.ps1
 ```
 
-This script will:
-- detect or install Python 3.12 when needed
-- create a local `.venv`
-- install runtime dependencies
-- launch the app by default
+### macOS (automated)
 
-### If you only want to install dependencies
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\setup.ps1 -SetupOnly
+```bash
+chmod +x ./setup_macos.sh
+./setup_macos.sh
 ```
 
-### Run the app directly
-After setup, activate the virtual environment and run the main program:
+Setup-only mode:
 
-```powershell
-.venv\Scripts\activate
+```bash
+./setup_macos.sh --setup-only
+```
+
+## Run
+
+```bash
 python body_framing_guidance/main.py
 ```
 
-### Optional arguments
+Optional camera and panel arguments:
 
-```powershell
-python body_framing_guidance/main.py --camera-index 1 --frame-width 1280 --frame-height 720
+```bash
+python body_framing_guidance/main.py --camera-index 0 --frame-width 1280 --frame-height 720
+python body_framing_guidance/main.py --no-web-panel
+python body_framing_guidance/main.py --web-panel-host 0.0.0.0 --web-panel-port 5000
 python body_framing_guidance/main.py --list-cameras
 ```
 
-## Camera and missing-camera behavior
-- The app can detect multiple connected cameras.
-- Use `--list-cameras` to enumerate devices.
-- If no camera is available, the app displays a black recovery screen and provides instructions.
-- Recovery mode supports:
-  - `r` to rescan and reconnect
-  - `c` to choose a camera from detected devices
-  - `l` to list cameras again
-  - `q` to quit
+`--list-cameras` now prints index plus friendly device name when available.
 
-## How it works
-### MediaPipe Pose for person detection
-The app uses MediaPipe Pose because it provides 33 landmarks, including ankles and feet, which are essential for full-body framing checks. This is a stronger fit than 17-keypoint models when determining whether a user is too close, too far, or partially cropped.
+## Project Structure
 
-### Framing heuristics
-The classifier follows a strict priority order:
-1. NO_PERSON
-2. TOO_CLOSE
-3. TOO_FAR
-4. SHIFTED_LEFT / SHIFTED_RIGHT
-5. GOOD
+```text
+README.md
+requirements.txt
+setup.ps1
+setup_macos.sh
+TRADEOFFS.md
+body_framing_guidance/
+  main.py
+  config.py
+  pose_detector.py
+  framing_logic.py
+  debounce_controller.py
+  gesture_controller.py
+  remote_control.py
+  session_logger.py
+  audio_engine.py
+  utils.py
+  audio_clips/
+```
 
-The key metric is `body_span_ratio`, computed from the nose to ankle average in pixel coordinates. Hip midpoint is used for centering because it is more stable under head and shoulder motion.
-
-### Audio feedback design
-The app uses a layered audio engine:
-- Layer 1: gTTS + pygame (preferred when internet is available)
-- Layer 2: locally cached or manually supplied MP3 clips in `body_framing_guidance/audio_cache/` or `body_framing_guidance/audio_clips/`
-- Layer 3: pyttsx3 offline TTS
-
-The system now automatically persists generated voice prompts to `body_framing_guidance/audio_cache/` so manual audio file provisioning is optional.
-
-This chain ensures the system remains usable even if internet or one audio backend is unavailable.
-
-### Debouncing
-Audio is only spoken when a state is stable for several frames and when the state changes. A cooldown prevents rapid re-triggering. This makes the guidance feel much more polished than speaking every frame.
-
-## Design decisions and why they matter
-### Why MediaPipe Pose
-- CPU-friendly
-- 33 landmarks including ankles/feet
-- Easy Python API
-- Strong fit for fitness-style applications
-
-### Why keypoint heuristics instead of bounding boxes
-- Bounding boxes alone cannot reliably detect foot crop or user centering.
-- Keypoints allow reasoning about ankle visibility, head position, and hip alignment.
-
-### Why layered audio fallbacks
-- Real-time audio should not depend on a single network or playback path.
-- The app prefers higher-quality speech but can still function offline.
-
-### Why a black recovery screen instead of corrupted camera output
-- If the camera fails, showing a static informative screen is much clearer than an unreliable image.
-- This improves usability and prevents the user from assuming the app is simply broken.
-
-## Known limitations
-- Front-view only; side/rear poses are unsupported.
-- Single-person assumption only.
-- Requires reasonably good lighting.
-- Baggy clothing can reduce pose landmark visibility.
-- The app is not a production-grade posture classifier; it is a framing guidance prototype.
-
-## Future directions
-### Immediate improvements
-- Add a calibration mode for different room/camera setups.
-- Use MediaPipe world landmarks or depth estimation for actual distance measurements.
-- Add a small GUI overlay menu for camera selection and setup.
-- Add a more natural offline TTS model or local voice pack.
-
-### Longer-term enhancements
-- Add a learned framing quality model on top of pose heuristics.
-- Add gesture-based controls for silent setup.
-- Add a multi-person detection mode with explicit single-user tracking.
-- Add a visual demo mode that records a short guidance session.
-
-## Uploading to GitHub
-This repository is already structured for GitHub. The code lives under `body_framing_guidance/`, and the root `README.md` and `TRADEOFFS.md` provide the main documentation.
-
-## Useful files
-- `README.md` — this document
-- `TRADEOFFS.md` — decision tables and tradeoff analysis
-- `requirements.txt` — pinned runtime dependencies
-- `setup.ps1` — Windows-first setup and launch script
-- `body_framing_guidance/` — contains all source code and utilities
-- `body_framing_guidance/audio_clips/README.txt` — instructions for local fallback clips
+## Notes
+- Voice commands were intentionally not included in this pass. In noisy real-world rooms they can be less reliable than gesture + phone control for this use case.
+- The app remains single-person by design.
