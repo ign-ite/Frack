@@ -95,12 +95,10 @@ def draw_guidance_overlay(
     lean_angle_deg: Optional[float],
     fps_value: Optional[float],
     is_muted: bool,
-    assessment_mode: bool,
     debug_enabled: bool,
     hip_left_threshold: float = HIP_LEFT_THRESHOLD,
     hip_right_threshold: float = HIP_RIGHT_THRESHOLD,
     countdown_remaining: Optional[float] = None,
-    good_hold_remaining: Optional[float] = None,
     posture_warning: bool = False,
 ) -> None:
     """Render assignment-required debug and guidance overlays.
@@ -155,8 +153,7 @@ def draw_guidance_overlay(
 
     is_good_state = state_label.upper() == "GOOD"
     state_color = STATE_GOOD_COLOR if is_good_state else STATE_BAD_COLOR
-    assessment_label = "ASSESSMENT: ON" if assessment_mode else "ASSESSMENT: OFF"
-    state_text = f"STATE: {state_label}  |  ORIENTATION: {orientation_label}  |  {assessment_label}"
+    state_text = f"STATE: {state_label}  |  ORIENTATION: {orientation_label} |"
     (state_text_width, _), _ = cv2.getTextSize(
         state_text,
         cv2.FONT_HERSHEY_SIMPLEX,
@@ -337,18 +334,6 @@ def draw_guidance_overlay(
             scale=1.1,
             thickness=2,
         )
-
-    if good_hold_remaining is not None and good_hold_remaining > 0:
-        hold_text = f"Hold GOOD for {good_hold_remaining:.1f}s to auto-start"
-        _draw_center_text(
-            frame_bgr=frame_bgr,
-            text=hold_text,
-            y=int(frame_height * 0.85),
-            color=COUNTDOWN_COLOR,
-            scale=0.7,
-            thickness=2,
-        )
-
 
 def _draw_horizontal_arrow(frame_bgr, start: Tuple[int, int], end: Tuple[int, int], label: str) -> None:
     cv2.arrowedLine(frame_bgr, start, end, ARROW_COLOR, 4, tipLength=0.08)

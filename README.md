@@ -5,7 +5,6 @@ A webcam-based Python application that guides a user into a camera-ready full-bo
 This version prioritizes high-value product features over cosmetic add-ons:
 - Robust framing analysis for both front-facing and side-facing body orientations
 - Hands-free controls with gestures
-- Auto-start and auto-stop assessment mode
 - Remote control panel from a phone browser
 - Runtime calibration and session logging
 - Cleaner on-screen guidance with directional arrows and confidence telemetry
@@ -21,38 +20,31 @@ No extra libraries required; uses existing pose keypoints:
 - Both hands above head (hold): save screenshot
 - T-pose (hold ~2s): run calibration
 
-### 3) Auto Assessment Flow
-- When user holds `GOOD` for 3 consecutive seconds, assessment mode starts automatically
-- A screenshot is auto-saved at assessment start
-- If user drifts out of `GOOD` for 2 seconds, assessment mode auto-stops
-
-### 4) Phone Web Control Panel
+### 3) Phone Web Control Panel
 Optional local Flask server provides controls at `http://<host>:5000`:
-- Start assessment
-- Stop assessment
 - Mute/unmute
 - Screenshot
 - Calibrate baseline
 
-### 5) Timed Launch
+### 4) Timed Launch
 A startup countdown is rendered for 10 seconds. Pose analysis begins after countdown completes.
 
-### 6) Calibration Mode
+### 5) Calibration Mode
 Calibration captures the user’s current “good” pose baseline and stores dynamic thresholds in:
 - `body_framing_guidance/calibration_profile.json`
 
-### 7) Product Telemetry / Observability
+### 6) Product Telemetry / Observability
 Session events are written to CSV:
 - Folder: `body_framing_guidance/session_logs/`
 - Includes state changes, orientation, key metrics, and action sources (keyboard, gesture, remote, auto)
 
-### 8) Cleaner UI Overlay
+### 7) Cleaner UI Overlay
 Overlay now includes:
-- State, orientation, assessment status
+- State and orientation
 - Directional arrows for left/right correction
 - FPS, audio status, confidence metrics
 - Lean-angle warning for posture stability
-- Countdown and hold timers
+- Countdown timer
 
 ## Keyboard Controls
 - `q` quit
@@ -60,8 +52,6 @@ Overlay now includes:
 - `m` mute/unmute
 - `d` toggle debug telemetry overlay
 - `c` calibration
-- `a` start assessment
-- `x` stop assessment
 
 ## Requirements
 - Python 3.10-3.12 (recommended: 3.12)

@@ -24,7 +24,9 @@ from config import (
     LANDMARK_RIGHT_HIP,
     LANDMARK_RIGHT_SHOULDER,
     MIN_VISIBILITY_THRESHOLD,
+    SIDE_CENTER_RELAX_MARGIN,
     SIDE_ORIENTATION_RATIO_THRESHOLD,
+    SIDE_SHIFT_VISIBILITY_THRESHOLD,
     TOO_CLOSE_ANKLE_VISIBILITY_THRESHOLD,
     TOO_CLOSE_SHOULDER_VISIBILITY_THRESHOLD,
     TOO_CLOSE_SPAN_RATIO,
@@ -241,8 +243,16 @@ class FramingLogic:
                 lean_angle_deg=lean_angle_deg,
             )
 
+        shift_left_threshold = self._hip_left_threshold
+        shift_right_threshold = self._hip_right_threshold
+        if orientation_label == "SIDE":
+            side_vis = min((left_hip.visibility if left_hip is not None else 0.0), (right_hip.visibility if right_hip is not None else 0.0))
+            if side_vis < SIDE_SHIFT_VISIBILITY_THRESHOLD:
+                shift_left_threshold = max(0.10, self._hip_left_threshold - SIDE_CENTER_RELAX_MARGIN)
+                shift_right_threshold = min(0.90, self._hip_right_threshold + SIDE_CENTER_RELAX_MARGIN)
+
         # Priority 4: lateral centering by hip midpoint, which is torso-stable.
-        if mid_hip_x < self._hip_left_threshold:
+        if mid_hip_x < shift_left_threshold:
             return self._analysis(
                 state=FramingState.SHIFTED_LEFT,
                 body_span_ratio=body_span_ratio,
@@ -254,7 +264,7 @@ class FramingLogic:
                 lean_angle_deg=lean_angle_deg,
             )
 
-        if mid_hip_x > self._hip_right_threshold:
+        if mid_hip_x > shift_right_threshold:
             return self._analysis(
                 state=FramingState.SHIFTED_RIGHT,
                 body_span_ratio=body_span_ratio,

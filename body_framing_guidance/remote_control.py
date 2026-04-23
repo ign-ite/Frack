@@ -88,8 +88,6 @@ HTML_TEMPLATE = """
     <h1>Framing Control Panel</h1>
     <p>Use this page from your phone on the same Wi-Fi network to control the live guidance app.</p>
     <div class="grid">
-      <button class="teal" onclick="sendAction('start')">Start Assessment</button>
-      <button class="slate" onclick="sendAction('stop')">Stop Assessment</button>
       <button class="amber" onclick="sendAction('mute')">Mute / Unmute</button>
       <button class="slate" onclick="sendAction('screenshot')">Save Screenshot</button>
       <button class="teal wide" onclick="sendAction('calibrate')">Calibrate Baseline</button>
@@ -118,8 +116,6 @@ class RemoteControlServer:
     """Serve a small local web UI and publish actions into a queue."""
 
     _SUPPORTED_ACTIONS: Set[str] = {
-        "start",
-        "stop",
         "mute",
         "screenshot",
         "calibrate",

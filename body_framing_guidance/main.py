@@ -15,8 +15,6 @@ import numpy as np
 
 from audio_engine import AudioEngine
 from config import (
-    AUTO_ASSESS_BAD_HOLD_SECONDS,
-    AUTO_ASSESS_GOOD_HOLD_SECONDS,
     CALIBRATE_KEY,
     CAMERA_RECONNECT_ATTEMPTS,
     CAMERA_RECONNECT_WAIT_SECONDS,
@@ -45,9 +43,7 @@ from config import (
     SCREENSHOT_FOLDER,
     SCREENSHOT_KEY,
     SMALL_FONT_SCALE,
-    START_ASSESS_KEY,
     STARTUP_COUNTDOWN_SECONDS,
-    STOP_ASSESS_KEY,
     WAIT_KEY_DELAY_MS,
     WEB_PANEL_ENABLED_DEFAULT,
     WEB_PANEL_HOST,
@@ -56,7 +52,7 @@ from config import (
     WINDOW_TITLE,
 )
 from debounce_controller import DebounceController
-from framing_logic import FramingLogic, FramingState, state_to_instruction_key
+from framing_logic import FramingLogic, state_to_instruction_key
 from gesture_controller import GestureController
 from pose_detector import PoseDetector
 from remote_control import RemoteControlServer
@@ -730,14 +726,11 @@ def main() -> None:
     consecutive_read_failures = 0
     is_muted = False
     debug_enabled = True
-    assessment_mode = False
     startup_time = time.time()
     screenshot_dir = Path(__file__).resolve().parent / SCREENSHOT_FOLDER
     screenshot_dir.mkdir(parents=True, exist_ok=True)
 
     last_stable_state = None
-    good_hold_started_at: Optional[float] = None
-    bad_hold_started_at: Optional[float] = None
     last_posture_warning_at = 0.0
 
     print("[Main] Starting real-time framing guidance. Press 'q' to exit.")
@@ -811,12 +804,10 @@ def main() -> None:
                     lean_angle_deg=None,
                     fps_value=fps_value,
                     is_muted=is_muted,
-                    assessment_mode=False,
                     debug_enabled=debug_enabled,
                     hip_left_threshold=framing_logic.hip_thresholds[0],
                     hip_right_threshold=framing_logic.hip_thresholds[1],
                     countdown_remaining=countdown_remaining,
-                    good_hold_remaining=None,
                     posture_warning=False,
                 )
                 cv2.imshow(WINDOW_TITLE, frame)
@@ -858,7 +849,6 @@ def main() -> None:
                     body_span_ratio=analysis.body_span_ratio,
                     mid_hip_x=analysis.mid_hip_x,
                     lean_angle_deg=analysis.lean_angle_deg,
-                    assessment_mode=assessment_mode,
                 )
                 last_stable_state = analysis.state
 
@@ -873,27 +863,6 @@ def main() -> None:
             stable_state = (
                 decision.stable_state if decision.stable_state is not None else analysis.state
             )
-
-            if stable_state == analysis.state == FramingState.GOOD:
-                if good_hold_started_at is None:
-                    good_hold_started_at = now
-                if not assessment_mode and (now - good_hold_started_at) >= AUTO_ASSESS_GOOD_HOLD_SECONDS:
-                    assessment_mode = True
-                    session_logger.log_action("assessment_start", source="auto")
-                    _save_screenshot(frame, screenshot_dir, source="auto_start")
-                    if not is_muted:
-                        audio_engine.speak("good")
-            else:
-                good_hold_started_at = None
-
-            if assessment_mode and stable_state != FramingState.GOOD:
-                if bad_hold_started_at is None:
-                    bad_hold_started_at = now
-                if (now - bad_hold_started_at) >= AUTO_ASSESS_BAD_HOLD_SECONDS:
-                    assessment_mode = False
-                    session_logger.log_action("assessment_stop", source="auto")
-            else:
-                bad_hold_started_at = None
 
             posture_warning = (
                 analysis.lean_angle_deg is not None
@@ -928,22 +897,8 @@ def main() -> None:
                         session_logger.log_action("calibrate", source=source, details="ok")
                     else:
                         session_logger.log_action("calibrate", source=source, details="failed")
-                elif action == "start":
-                    assessment_mode = True
-                    session_logger.log_action("assessment_start", source=source)
-                elif action == "stop":
-                    assessment_mode = False
-                    session_logger.log_action("assessment_stop", source=source)
 
             draw_pose_skeleton(frame, detection.pose_landmarks_proto)
-
-            good_hold_remaining = None
-            if not assessment_mode:
-                if good_hold_started_at is None:
-                    good_hold_remaining = AUTO_ASSESS_GOOD_HOLD_SECONDS
-                else:
-                    elapsed_good_hold = now - good_hold_started_at
-                    good_hold_remaining = max(0.0, AUTO_ASSESS_GOOD_HOLD_SECONDS - elapsed_good_hold)
 
             draw_guidance_overlay(
                 frame_bgr=frame,
@@ -957,12 +912,10 @@ def main() -> None:
                 lean_angle_deg=analysis.lean_angle_deg,
                 fps_value=fps_value,
                 is_muted=is_muted,
-                assessment_mode=assessment_mode,
                 debug_enabled=debug_enabled,
                 hip_left_threshold=framing_logic.hip_thresholds[0],
                 hip_right_threshold=framing_logic.hip_thresholds[1],
                 countdown_remaining=countdown_remaining if countdown_remaining > 0 else None,
-                good_hold_remaining=good_hold_remaining,
                 posture_warning=posture_warning,
             )
 
@@ -994,12 +947,6 @@ def main() -> None:
                     session_logger.log_action("calibrate", source="keyboard", details="ok")
                 else:
                     session_logger.log_action("calibrate", source="keyboard", details="failed")
-            if key == ord(START_ASSESS_KEY):
-                assessment_mode = True
-                session_logger.log_action("assessment_start", source="keyboard")
-            if key == ord(STOP_ASSESS_KEY):
-                assessment_mode = False
-                session_logger.log_action("assessment_stop", source="keyboard")
 
     except KeyboardInterrupt:
         # Ctrl+C should always trigger a clean shutdown path.

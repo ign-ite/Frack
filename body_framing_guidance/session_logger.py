@@ -29,7 +29,6 @@ class SessionLogger:
                 "body_span_ratio",
                 "mid_hip_x",
                 "lean_angle_deg",
-                "assessment_mode",
                 "source",
                 "details",
             ]
@@ -43,7 +42,6 @@ class SessionLogger:
         body_span_ratio: Optional[float],
         mid_hip_x: Optional[float],
         lean_angle_deg: Optional[float],
-        assessment_mode: bool,
     ) -> None:
         self._write_row(
             event_type="state_change",
@@ -52,7 +50,6 @@ class SessionLogger:
             body_span_ratio=body_span_ratio,
             mid_hip_x=mid_hip_x,
             lean_angle_deg=lean_angle_deg,
-            assessment_mode=assessment_mode,
             source="system",
             details="",
         )
@@ -65,7 +62,6 @@ class SessionLogger:
             body_span_ratio=None,
             mid_hip_x=None,
             lean_angle_deg=None,
-            assessment_mode=False,
             source=source,
             details=f"{action}:{details}" if details else action,
         )
@@ -78,7 +74,6 @@ class SessionLogger:
         body_span_ratio: Optional[float],
         mid_hip_x: Optional[float],
         lean_angle_deg: Optional[float],
-        assessment_mode: bool,
         source: str,
         details: str,
     ) -> None:
@@ -91,7 +86,6 @@ class SessionLogger:
                 "" if body_span_ratio is None else f"{body_span_ratio:.4f}",
                 "" if mid_hip_x is None else f"{mid_hip_x:.4f}",
                 "" if lean_angle_deg is None else f"{lean_angle_deg:.2f}",
-                str(assessment_mode),
                 source,
                 details,
             ]

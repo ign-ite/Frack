@@ -7,7 +7,6 @@ This folder contains the full runtime for real-time webcam framing guidance.
 The runtime now focuses on high-impact product behavior:
 - Orientation-aware guidance (`FRONT` and `SIDE` body poses)
 - Gesture control actions (mute, screenshot, calibration)
-- Auto assessment mode transitions
 - Remote control API + phone web panel
 - Startup countdown before analysis
 - User-specific calibration with persisted thresholds

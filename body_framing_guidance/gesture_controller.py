@@ -9,6 +9,7 @@ from config import (
     GESTURE_T_POSE_COOLDOWN_SECONDS,
     GESTURE_T_POSE_HOLD_SECONDS,
     GESTURE_WAVE_COOLDOWN_SECONDS,
+    GESTURE_WAVE_RAISE_MARGIN,
     GESTURE_WAVE_MIN_AMPLITUDE,
     GESTURE_WAVE_MIN_DIRECTION_CHANGES,
     GESTURE_WAVE_WINDOW_SECONDS,
@@ -20,6 +21,7 @@ from config import (
     LANDMARK_RIGHT_SHOULDER,
     LANDMARK_RIGHT_WRIST,
     T_POSE_MIN_SPAN,
+    T_POSE_ARM_EXTENSION_MIN,
     T_POSE_VERTICAL_TOLERANCE,
     WRIST_VISIBILITY_THRESHOLD,
 )
@@ -93,17 +95,22 @@ class GestureController:
 
         if (
             not self._is_visible(left_wrist, WRIST_VISIBILITY_THRESHOLD)
-            or left_elbow is None
-            or left_shoulder is None
+            or not self._is_visible(left_elbow, WRIST_VISIBILITY_THRESHOLD)
+            or not self._is_visible(left_shoulder, WRIST_VISIBILITY_THRESHOLD)
         ):
+            self._left_wrist_history.clear()
+            return False
+
+        hand_raised = left_wrist.y_norm < min(
+            left_elbow.y_norm - GESTURE_WAVE_RAISE_MARGIN,
+            left_shoulder.y_norm - GESTURE_WAVE_RAISE_MARGIN,
+        )
+        if not hand_raised:
+            self._left_wrist_history.clear()
             return False
 
         self._left_wrist_history.append((now, left_wrist.x_norm))
         if len(self._left_wrist_history) < 6:
-            return False
-
-        hand_raised = left_wrist.y_norm < min(left_elbow.y_norm, left_shoulder.y_norm)
-        if not hand_raised:
             return False
 
         x_values = [value for _, value in self._left_wrist_history]
@@ -185,7 +192,10 @@ class GestureController:
             left_wrist,
             right_wrist,
         ]
-        if any(point is None for point in required_points):
+        if any(
+            point is None or point.visibility < WRIST_VISIBILITY_THRESHOLD
+            for point in required_points
+        ):
             self._t_pose_started_at = None
             return False
 
@@ -197,8 +207,16 @@ class GestureController:
             abs(right_elbow.y_norm - right_shoulder.y_norm) <= T_POSE_VERTICAL_TOLERANCE
             and abs(right_wrist.y_norm - right_shoulder.y_norm) <= T_POSE_VERTICAL_TOLERANCE
         )
+        left_extension = abs(left_wrist.x_norm - left_shoulder.x_norm)
+        right_extension = abs(right_wrist.x_norm - right_shoulder.x_norm)
         arm_span = abs(right_wrist.x_norm - left_wrist.x_norm)
-        t_pose = left_horizontal and right_horizontal and arm_span >= T_POSE_MIN_SPAN
+        t_pose = (
+            left_horizontal
+            and right_horizontal
+            and left_extension >= T_POSE_ARM_EXTENSION_MIN
+            and right_extension >= T_POSE_ARM_EXTENSION_MIN
+            and arm_span >= T_POSE_MIN_SPAN
+        )
 
         if t_pose:
             if self._t_pose_started_at is None:
