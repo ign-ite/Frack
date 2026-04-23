@@ -92,17 +92,22 @@ Controls:
 - Reconnect fallback: if reconnect attempts fail, the app enters a black-screen recovery mode instead of showing corrupted visuals.
 - Missing camera voice prompt: a periodic audio line announces that no camera was detected.
 
-### Layer 2 fallback: record your own clips
-1. Put MP3 files in `body_framing_guidance/audio_clips/`.
-2. Required file names:
-   - `no_person.mp3`
-   - `too_close.mp3`
-   - `too_far.mp3`
-   - `move_left.mp3`
-   - `move_right.mp3`
-   - `good.mp3`
-3. Optional: `hold.mp3`
-4. See `body_framing_guidance/audio_clips/README.txt` for phrase text and recording tips.
+### Audio fallback behavior and optional clips
+The app automatically generates and caches voice prompts when internet is available. This cache is stored in `body_framing_guidance/audio_cache/`, so you do not need to provide your own MP3 files manually.
+
+If you want to override or provide alternative voice prompts, you may still place MP3 files in `body_framing_guidance/audio_clips/` with these names:
+- `no_person.mp3`
+- `too_close.mp3`
+- `too_far.mp3`
+- `move_left.mp3`
+- `move_right.mp3`
+- `good.mp3`
+
+Optional:
+- `hold.mp3`
+- `missing_camera.mp3`
+
+The app will prefer cached generated audio first, then manual clips if present.
 
 ## 4. Tech Stack & Why
 ### Vision stack: MediaPipe Pose (BlazePose)

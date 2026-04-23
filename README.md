@@ -1,4 +1,4 @@
-# Eidovis Body Framing Guidance Prototype
+# Frack
 
 ## Project summary
 This repository contains a real-time body framing guidance prototype built in Python. The codebase uses a live webcam feed, MediaPipe Pose for full-body keypoint estimation, deterministic framing heuristics, and audio prompts to help a user position their body correctly in frame.
@@ -102,8 +102,10 @@ The key metric is `body_span_ratio`, computed from the nose to ankle average in 
 ### Audio feedback design
 The app uses a layered audio engine:
 - Layer 1: gTTS + pygame (preferred when internet is available)
-- Layer 2: local pre-recorded MP3 clips in `body_framing_guidance/audio_clips/`
+- Layer 2: locally cached or manually supplied MP3 clips in `body_framing_guidance/audio_cache/` or `body_framing_guidance/audio_clips/`
 - Layer 3: pyttsx3 offline TTS
+
+The system now automatically persists generated voice prompts to `body_framing_guidance/audio_cache/` so manual audio file provisioning is optional.
 
 This chain ensures the system remains usable even if internet or one audio backend is unavailable.
 
@@ -150,7 +152,7 @@ Audio is only spoken when a state is stable for several frames and when the stat
 - Add a visual demo mode that records a short guidance session.
 
 ## Uploading to GitHub
-This repository is already structured for GitHub. Upload the entire `eidovis` folder as a single repo. The code lives under `body_framing_guidance/`, and the root `README.md` and `TRADEOFFS.md` provide the main documentation.
+This repository is already structured for GitHub. The code lives under `body_framing_guidance/`, and the root `README.md` and `TRADEOFFS.md` provide the main documentation.
 
 ## Useful files
 - `README.md` — this document

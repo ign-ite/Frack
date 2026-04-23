@@ -31,4 +31,6 @@ Recording guidance:
 3) Normalize loudness so all prompts have similar volume.
 4) Export as MP3 and keep a sample rate of 44.1 kHz or 48 kHz.
 
+Note: manual clips are optional. The app automatically generates and caches voice prompts in `audio_cache/` when internet is available.
+
 When Layer 1 (gTTS+pygame) fails, the app automatically checks this folder.
